@@ -13,10 +13,13 @@ from agentless.util.preprocess_data import (
     filter_out_test_files,
     get_repo_structure,
 )
-from agentless.util.utils import load_json, load_jsonl, setup_logger
+from agentless.util.utils import load_jsonl, setup_logger
 
 
 def retrieve_locs(bug, args, swe_bench_data, found_files, prev_o, write_lock=None):
+    instance_id = bug["instance_id"]
+    log_file = os.path.join(args.output_folder, "retrieval_logs", f"{instance_id}.log")
+    logger = setup_logger(log_file)
 
     found = False
     for o in prev_o:
@@ -28,14 +31,10 @@ def retrieve_locs(bug, args, swe_bench_data, found_files, prev_o, write_lock=Non
         logger.info(f"skipping {bug['instance_id']} since patch already generated")
         return None
 
-    instance_id = bug["instance_id"]
-
     if args.target_id is not None:
         if args.target_id != instance_id:
             return None
 
-    log_file = os.path.join(args.output_folder, "retrieval_logs", f"{instance_id}.log")
-    logger = setup_logger(log_file)
     logger.info(f"Processing bug {instance_id}")
 
     bench_data = [x for x in swe_bench_data if x["instance_id"] == instance_id][0]
@@ -62,7 +61,6 @@ def retrieve_locs(bug, args, swe_bench_data, found_files, prev_o, write_lock=Non
         instance_id,
         structure,
         problem_statement,
-        persist_dir=args.persist_dir,
         filter_type=args.filter_type,
         index_type=args.index_type,
         chunk_size=args.chunk_size,
@@ -71,7 +69,7 @@ def retrieve_locs(bug, args, swe_bench_data, found_files, prev_o, write_lock=Non
         **kwargs,
     )
 
-    file_names, meta_infos, traj = retriever.retrieve(mock=args.mock)
+    file_names, meta_infos = retriever.retrieve(mock=args.mock)
 
     if write_lock is not None:
         write_lock.acquire()
@@ -82,11 +80,11 @@ def retrieve_locs(bug, args, swe_bench_data, found_files, prev_o, write_lock=Non
                     "instance_id": instance_id,
                     "found_files": file_names,
                     "node_info": meta_infos,
-                    "traj": traj,
                 }
             )
             + "\n"
         )
+    logger.info(f"Wrote retrieved files for {instance_id}")
     if write_lock is not None:
         write_lock.release()
 
@@ -145,7 +143,6 @@ def main():
     parser.add_argument("--filter_file", type=str, default="")
     parser.add_argument("--chunk_size", type=int, default=512)
     parser.add_argument("--chunk_overlap", type=int, default=0)
-    parser.add_argument("--persist_dir", type=str)
     parser.add_argument("--target_id", type=str)
     parser.add_argument("--mock", action="store_true")
     parser.add_argument(

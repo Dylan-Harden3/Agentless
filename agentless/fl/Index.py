@@ -2,19 +2,12 @@ import copy
 import os
 from abc import ABC
 
-import tiktoken
 from llama_index.core import (
     Document,
-    MockEmbedding,
     Settings,
-    StorageContext,
-    VectorStoreIndex,
-    load_index_from_storage,
 )
-from llama_index.core.callbacks import CallbackManager, TokenCountingHandler
-from llama_index.core.retrievers import VectorIndexRetriever
 from llama_index.core.schema import MetadataMode
-from llama_index.embeddings.openai import OpenAIEmbedding
+from dotenv import load_dotenv
 
 from agentless.util.api_requests import num_tokens_from_messages
 from agentless.util.index_skeleton import parse_global_stmt_from_code
@@ -23,6 +16,9 @@ from agentless.util.preprocess_data import (
     get_full_file_paths_and_classes_and_functions,
 )
 from get_repo_structure.get_repo_structure import parse_python_file
+from google import genai
+import numpy as np
+import faiss
 
 
 def construct_file_meta_data(file_name: str, clazzes: list, functions: list) -> dict:
@@ -180,7 +176,6 @@ class EmbeddingIndex(ABC):
         instance_id,
         structure,
         problem_statement,
-        persist_dir,
         filter_type,
         index_type,
         chunk_size,
@@ -191,17 +186,12 @@ class EmbeddingIndex(ABC):
         self.instance_id = instance_id
         self.structure = structure
         self.problem_statement = problem_statement
-        self.persist_dir = persist_dir + "/{instance_id}"
         self.filter_type = filter_type
         self.index_type = index_type
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.logger = logger
         self.kwargs = kwargs
-        # set some embedding global settings.
-
-        Settings.chunk_size = chunk_size
-        Settings.chunk_overlap = chunk_overlap
 
     def filter_files(self, files):
         if self.filter_type == "given_files":
@@ -213,89 +203,103 @@ class EmbeddingIndex(ABC):
         else:
             raise NotImplementedError
 
+    def chunk_documents(self, documents):
+        all_chunks = []
+        doc_ids = []
+
+        for doc_id, doc in enumerate(documents):
+            chunks = []
+            # TODO: not sure if original does chunk_size tokens or characters...
+            for i in range(0, len(doc.text), self.chunk_size - self.chunk_overlap):
+                chunk = doc.text[i : i + self.chunk_size]
+                chunks.append(chunk)
+
+            all_chunks.extend(chunks)
+            doc_ids.extend([doc_id] * len(chunks))
+
+        return all_chunks, doc_ids
+
     def retrieve(self, mock=False):
+        files, _, _ = get_full_file_paths_and_classes_and_functions(self.structure)
+        filtered_files = self.filter_files(files)
+        self.logger.info(f"Total number of considered files: {len(filtered_files)}")
+        print(f"Total number of considered files: {len(filtered_files)}")
+        documents = []
+        for file_content in files:
+            content = "\n".join(file_content[1])
+            file_name = file_content[0]
 
-        persist_dir = self.persist_dir.format(instance_id=self.instance_id)
-        token_counter = TokenCountingHandler(
-            tokenizer=tiktoken.encoding_for_model("text-embedding-3-small").encode
-        )
-        if not os.path.exists(persist_dir) or mock:
-            files, _, _ = get_full_file_paths_and_classes_and_functions(self.structure)
-            filtered_files = self.filter_files(files)
-            self.logger.info(f"Total number of considered files: {len(filtered_files)}")
-            print(f"Total number of considered files: {len(filtered_files)}")
-            documents = []
+            if file_name not in filtered_files:
+                continue
 
-            for file_content in files:
-                content = "\n".join(file_content[1])
-                file_name = file_content[0]
-
-                if file_name not in filtered_files:
-                    continue
-
-                # create documents
-                class_info, function_names, _ = parse_python_file(None, content)
-                if self.index_type == "simple":
-                    docs = build_file_documents_simple(
-                        class_info, function_names, file_name, content
-                    )
-                elif self.index_type == "complex":
-                    docs = build_file_documents_complex(
-                        class_info, function_names, file_name, content
-                    )
-                else:
-                    raise NotImplementedError
-
-                documents.extend(docs)
-
-            self.logger.info(f"Total number of documents: {len(documents)}")
-            print(f"Total number of documents: {len(documents)}")
-
-            if mock:
-                embed_model = MockEmbedding(
-                    embed_dim=1024
-                )  # embedding dimension does not matter for mocking.
-                Settings.callback_manager = CallbackManager([token_counter])
+            class_info, function_names, _ = parse_python_file(None, content)
+            if self.index_type == "simple":
+                docs = build_file_documents_simple(
+                    class_info, function_names, file_name, content
+                )
+            elif self.index_type == "complex":
+                docs = build_file_documents_complex(
+                    class_info, function_names, file_name, content
+                )
             else:
-                embed_model = OpenAIEmbedding(model_name="text-embedding-3-small")
-            index = VectorStoreIndex.from_documents(documents, embed_model=embed_model)
-            index.storage_context.persist(persist_dir=persist_dir)
-        else:
-            storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
-            index = load_index_from_storage(storage_context)
+                raise NotImplementedError
 
-        self.logger.info(f"Retrieving with query:\n{self.problem_statement}")
+            documents.extend(docs)
 
-        retriever = VectorIndexRetriever(index=index, similarity_top_k=100)
-        documents = retriever.retrieve(self.problem_statement)
+        self.logger.info(f"Total number of documents: {len(documents)}")
+        print(f"Total number of documents: {len(documents)}")
+        if len(documents) == 0:
+            return [], []
 
-        self.logger.info(
-            f"Embedding Tokens: {token_counter.total_embedding_token_count}"
+        load_dotenv()
+        client = genai.Client(api_key=os.getenv("API_KEY"))
+
+        chunks, doc_ids = self.chunk_documents(documents)
+
+        embeddings = []
+        # this api excepts batches of max 100 chunks
+        for i in range(0, len(chunks), 100):
+            embeddings.extend(
+                client.models.embed_content(
+                    model="text-embedding-004", contents=chunks[i : i + 100]
+                ).embeddings
+            )
+
+        embeddings_np = np.array([e.values for e in embeddings], dtype=np.float32)
+        dimension = embeddings_np.shape[1]
+
+        index = faiss.IndexFlatIP(dimension)
+        index.add(embeddings_np)
+
+        query_embedding = (
+            client.models.embed_content(
+                model="text-embedding-004", contents=self.problem_statement
+            )
+            .embeddings[0]
+            .values
         )
-        print(f"Embedding Tokens: {token_counter.total_embedding_token_count}")
+        query_vec = np.array([query_embedding], dtype=np.float32)
 
-        traj = {
-            "usage": {"embedding_tokens": token_counter.total_embedding_token_count}
-        }
+        distances, indices = index.search(query_vec, k=100)
 
-        token_counter.reset_counts()
-
-        if mock:
-            self.logger.info("Skipping since mock=True")
-            return [], None, traj
+        chunks = [chunks[i] for i in indices[0]]
+        doc_ids = [doc_ids[i] for i in indices[0]]
 
         file_names = []
         meta_infos = []
-
-        for node in documents:
-            file_name = node.node.metadata["File Name"]
+        for chunk, doc_id in zip(chunks, doc_ids):
+            file_name = documents[doc_id].metadata["File Name"]
             if file_name not in file_names:
                 file_names.append(file_name)
                 self.logger.info("================")
                 self.logger.info(file_name)
 
-            self.logger.info(node.node.text)
+                self.logger.info(documents[doc_id].text)
 
-            meta_infos.append({"code": node.node.text, "metadata": node.node.metadata})
-
-        return file_names, meta_infos, traj
+                meta_infos.append(
+                    {
+                        "code": documents[doc_id].text,
+                        "metadata": documents[doc_id].metadata,
+                    }
+                )
+        return file_names, meta_infos

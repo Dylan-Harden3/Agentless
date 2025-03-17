@@ -16,7 +16,7 @@ from agentless.util.preprocess_data import (
 )
 from agentless.util.utils import load_existing_instance_ids, load_jsonl, setup_logger
 
-MAX_RETRIES = 5
+MAX_RETRIES = 10
 
 
 def localize_irrelevant_instance(
@@ -209,7 +209,7 @@ def localize_instance(
                         break
 
                     logger.info(
-                        f"No valid related locations found ... retrying with higher temperature ..."
+                        "No valid related locations found ... retrying with higher temperature ..."
                     )
                     trying_temp = 1.0  # set trying temp to 1 to get valid locs
 
@@ -264,7 +264,7 @@ def localize_instance(
                         break
 
                     logger.info(
-                        f"No valid related locations found ... retrying with higher temperature ..."
+                        "No valid related locations found ... retrying with higher temperature ..."
                     )
                     trying_temp = 1.0  # set trying temp to 1 to get valid locs
 
@@ -323,7 +323,7 @@ def localize_instance(
                         break
 
                     logger.info(
-                        f"No valid edit locations found ... retrying with higher temperature ..."
+                        "No valid edit locations found ... retrying with higher temperature ..."
                     )
                     trying_temp = 1.0  # set trying temp to 1 to get valid locs
                 else:
@@ -367,7 +367,7 @@ def localize_instance(
                         break
 
                     logger.info(
-                        f"No valid edit locations found ... retrying with higher temperature ..."
+                        "No valid edit locations found ... retrying with higher temperature ..."
                     )
                     trying_temp = 1.0  # set trying temp to 1 to get valid locs
 
@@ -517,7 +517,7 @@ def check_valid_args(args):
         (not args.file_level) and (not args.start_file)
     ), "Must use either file_level or start_file"
 
-    assert (not "deepseek" in args.model) or (
+    assert ("deepseek" not in args.model) or (
         args.backend == "deepseek"
     ), "Must specify `--backend deepseek` if using a DeepSeek model"
 
@@ -571,19 +571,18 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-4o-2024-05-13",
+        default="gemini-2.0-flash",
         choices=[
-            "gpt-4o-2024-05-13",
-            "deepseek-coder",
-            "gpt-4o-mini-2024-07-18",
-            "claude-3-5-sonnet-20241022",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-thinking",
+            "gemini-2.0-flash-lite",
         ],
     )
     parser.add_argument(
         "--backend",
         type=str,
         default="openai",
-        choices=["openai", "deepseek", "anthropic"],
+        choices=["openai"],
     )
     parser.add_argument(
         "--dataset",
