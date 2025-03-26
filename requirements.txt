@@ -6,4 +6,4 @@ tiktoken
 libcst
 llama-index
 jsonlines
-swebench @ git+https://github.com/princeton-nlp/SWE-bench
+swebench @ git+https://github.com/princeton-nlp/SWE-bench@5f5a7df799663adba4b191eca3d675faf3621fe2
