@@ -32,13 +32,13 @@ def combine_file_level(args):
         combined_loc_counter = Counter()
         combined_locs = []
 
-        for loc in model_loc[: args.top_n]:
+        for loc in model_loc:
             combined_loc_counter[loc] += 1
 
-        for loc in retrieve_loc[: args.top_n]:
+        for loc in retrieve_loc:
             combined_loc_counter[loc] += 1
 
-        combined_locs = [loc for loc, _ in combined_loc_counter.most_common()]
+        combined_locs = [loc for loc, _ in combined_loc_counter.most_common()][:args.top_n]
 
         with open(args.output_file, "a") as f:
             f.write(

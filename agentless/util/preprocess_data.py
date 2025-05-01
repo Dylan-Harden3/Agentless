@@ -398,6 +398,35 @@ def show_project_structure(structure, spacing=0) -> str:
     return pp_string
 
 
+def show_project_structure_with_methods(structure, spacing=0) -> str:
+    """pprint the project structure"""
+
+    pp_string = ""
+
+    for key, value in structure.items():
+        if "." in key and ".py" not in key:
+            continue  # skip none python files
+        if "." in key:
+            pp_string += " " * spacing + str(key) + "\n"
+        else:
+            pp_string += " " * spacing + str(key) + "/" + "\n"
+        if "classes" not in value:
+            pp_string += show_project_structure_with_methods(value, spacing + 4)
+        else:
+            if len(value["classes"]):
+                pp_string += " " * (spacing+4) + "classes:" + "\n"
+                for classobj in value["classes"]:
+                    if not isinstance(classobj, dict):
+                        continue
+                    pp_string += " " * (spacing+8) + classobj["name"] + "\n"
+            if "functions" in value and len(value["functions"]):
+                pp_string += " " * (spacing+4) + "functions:" + "\n"
+                for functionobj in value["functions"]:
+                    pp_string += " " * (spacing+8) + functionobj["name"] + "\n"
+    
+    return pp_string
+
+
 def filter_out_test_files(structure):
     """filter out test files from the project structure"""
     for key, value in list(structure.items()):

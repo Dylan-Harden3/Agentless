@@ -80,7 +80,7 @@ def request_chatgpt_engine(config, logger, base_url="https://generativelanguage.
                 logger.info("Rate limit exceeded. Waiting...")
                 print(e)
                 logger.info(e)
-                time.sleep(5)
+                time.sleep(10)
             elif isinstance(e, openai.APIConnectionError):
                 print("API connection error. Waiting...")
                 logger.info("API connection error. Waiting...")

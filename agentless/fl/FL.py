@@ -9,9 +9,12 @@ from agentless.util.preprocess_data import (
     get_repo_files,
     line_wrap_content,
     show_project_structure,
+    show_project_structure_with_methods
 )
+from get_repo_structure.get_repo_structure import parse_python_file
+from collections import defaultdict, Counter
 
-MAX_CONTEXT_LENGTH = 128000
+MAX_CONTEXT_LENGTH = 1000000
 
 
 class FL(ABC):
@@ -27,9 +30,10 @@ class FL(ABC):
 
 class LLMFL(FL):
     obtain_relevant_files_prompt = """
-Please look through the following GitHub problem description and Repository structure and provide a list of files that one would need to edit to fix the problem.
+Given the following GitHub issue and the file structure of the repository. Your task is to provide a list of potential files that you might need to edit to resolve the issue.
+Only include the source files and no tests.
 
-### GitHub Problem Description ###
+### GitHub Issue ###
 {problem_statement}
 
 ###
@@ -39,15 +43,14 @@ Please look through the following GitHub problem description and Repository stru
 
 ###
 
-Please only provide the full path and return at most 5 files.
-The returned files should be separated by new lines ordered by most to least important and wrapped with ```
+Only provide the full path and return at most 5 files.
+You must provide the files separated by new lines and ordered by most to least important wrapped with ```
 For example:
 ```
 file1.py
 file2.py
 ```
 """
-
     obtain_irrelevant_files_prompt = """
 Please look through the following GitHub problem description and Repository structure and provide a list of folders that are irrelevant to fixing the problem.
 Note that irrelevant folders are those that do not need to be modified and are safe to ignored when trying to solve this problem.
@@ -318,7 +321,7 @@ Return just the locations wrapped with ```.
 
         message = self.obtain_relevant_files_prompt.format(
             problem_statement=self.problem_statement,
-            structure=show_project_structure(self.structure).strip(),
+            structure=show_project_structure_with_methods(self.structure).strip(),
         ).strip()
         self.logger.info(f"prompting with message:\n{message}")
         self.logger.info("=" * 80)
@@ -337,26 +340,21 @@ Return just the locations wrapped with ```.
             backend=self.backend,
             logger=self.logger,
             max_tokens=self.max_tokens,
-            temperature=0,
-            batch_size=1,
+            temperature=0.8,
+            batch_size=8,
         )
-        traj = model.codegen(message, num_samples=1)[0]
-        traj["prompt"] = message
-        raw_output = traj["response"]
-        model_found_files = self._parse_model_return_lines(raw_output)
-
+        traj = model.codegen(message, num_samples=8))
         files, classes, functions = get_full_file_paths_and_classes_and_functions(
             self.structure
         )
-
-        # sort based on order of appearance in model_found_files
-        found_files = correct_file_paths(model_found_files, files)
-
-        self.logger.info(raw_output)
+        model_found_files = [self._parse_model_return_lines(d["response"]) for d in traj]
+        model_found_files = [correct_file_paths(d, files) for d in model_found_files]
+        count = Counter([f for row in model_found_files for f in row])
+        found_files = [f for f, _ in count.most_common()][:5]
 
         return (
             found_files,
-            {"raw_output_files": raw_output},
+            {"raw_output_files": ""},
             traj,
         )
 
